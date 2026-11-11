@@ -75,8 +75,8 @@ jobs:
                   applicationId = "com.laraai.app"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 5
-                  versionName = "1.0.4"
+                  versionCode = 6
+                  versionName = "1.0.5"
               }
               buildTypes { release { isMinifyEnabled = false } }
               compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -100,7 +100,7 @@ jobs:
           }
           """
 
-          # AndroidManifest.xml مع الأيقونة المخصصة
+          # AndroidManifest.xml مع تفعيل الأيقونة
           files["android/app/src/main/AndroidManifest.xml"] = """<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
@@ -238,8 +238,9 @@ jobs:
                                                           reqList.addAll(history)
                                                           reqList.add(ChatMsg("user", userMsg))
 
-                                                          val res = api.ask("Bearer \$myApiKey", GroqReq(messages = reqList))
-                                                          val reply = res.body()?.choices?.firstOrNull()?.message?.content ?: "تكرم عينك، بس صار خلل بسيط، جرب كمان مرة!"
+                                                          val authHeader = "Bearer " + myApiKey
+                                                          val res = api.ask(authHeader, GroqReq(messages = reqList))
+                                                          val reply = res.body()?.choices?.firstOrNull()?.message?.content ?: "تكرم عينك، بس ما وصلني رد واضح من السيرفر!"
                                                           db.messageDao().insert(MessageEntity(sender = "LARA", text = reply))
                                                       } catch (e: Exception) {
                                                           db.messageDao().insert(MessageEntity(sender = "LARA", text = "معلش تأكد من الإنترنت، وبخدمك من عيوني!"))
@@ -279,7 +280,15 @@ jobs:
               with open(path, "w", encoding="utf-8") as f:
                   f.write(content)
 
-          # معالجة وتحويل الصورة المرفوعة إلى أيقونة رسمية
+          # معالجة صورة الأيقونة
+          icon_sizes = {
+              'mipmap-mdpi': 48,
+              'mipmap-hdpi': 72,
+              'mipmap-xhdpi': 96,
+              'mipmap-xxhdpi': 144,
+              'mipmap-xxxhdpi': 192
+          }
+
           valid_exts = ('.jpg', '.jpeg', '.png', '.webp')
           image_files = [f for f in os.listdir('.') if f.lower().endswith(valid_exts) and not f.startswith('.')]
 
@@ -288,31 +297,26 @@ jobs:
               with Image.open(src_img_path) as img:
                   w, h = img.size
                   sq_size = min(w, h)
-                  # قص الصورة بتركيز ذكي على الوجوه في الأعلى
-                  top = int(h * 0.22) if h > w else 0
+                  top = int(h * 0.20) if h > w else 0
                   if top + sq_size > h:
                       top = max(0, h - sq_size)
                   left = int((w - sq_size) / 2) if w > sq_size else 0
 
                   cropped = img.crop((left, top, left + sq_size, top + sq_size))
 
-                  # حفظ الأيقونة بجميع مقاسات الأندرويد الرسمية
-                  icon_sizes = {
-                      'mipmap-mdpi': 48,
-                      'mipmap-hdpi': 72,
-                      'mipmap-xhdpi': 96,
-                      'mipmap-xxhdpi': 144,
-                      'mipmap-xxxhdpi': 192
-                  }
-
                   for folder, size in icon_sizes.items():
                       out_dir = f"android/app/src/main/res/{folder}"
                       os.makedirs(out_dir, exist_ok=True)
                       resized = cropped.resize((size, size), Image.Resampling.LANCZOS)
                       resized.save(f"{out_dir}/ic_launcher.png", format="PNG")
-              print("Custom icon generated successfully!")
+              print("Custom icon generated successfully from image!")
           else:
-              print("No custom image found, default icon will be used.")
+              for folder, size in icon_sizes.items():
+                  out_dir = f"android/app/src/main/res/{folder}"
+                  os.makedirs(out_dir, exist_ok=True)
+                  fallback = Image.new('RGB', (size, size), color=(168, 85, 247))
+                  fallback.save(f"{out_dir}/ic_launcher.png", format="PNG")
+              print("Fallback icon generated.")
           EOF
 
       - name: Build APK with Gradle
