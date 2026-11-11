@@ -75,8 +75,8 @@ jobs:
                   applicationId = "com.laraai.app"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 7
-                  versionName = "1.0.6"
+                  versionCode = 8
+                  versionName = "1.0.7"
               }
               buildTypes { release { isMinifyEnabled = false } }
               compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -169,7 +169,7 @@ jobs:
           abstract class AppDb : RoomDatabase() { abstract fun messageDao(): MessageDao }
 
           data class ChatMsg(val role: String, val content: String)
-          data class GroqReq(val model: String = "llama-3.1-8b-instant", val messages: List<ChatMsg>)
+          data class GroqReq(val model: String, val messages: List<ChatMsg>)
           data class GroqChoice(val message: ChatMsg)
           data class GroqRes(val choices: List<GroqChoice>?)
 
@@ -239,16 +239,27 @@ jobs:
                                                           reqList.add(ChatMsg("user", userMsg))
 
                                                           val authHeader = "Bearer " + myApiKey
-                                                          val res = api.ask(authHeader, GroqReq(messages = reqList))
                                                           
-                                                          val reply = if (res.isSuccessful) {
-                                                              res.body()?.choices?.firstOrNull()?.message?.content ?: "تكرم عينك، ما وصل رد!"
-                                                          } else {
-                                                              val err = res.errorBody()?.string() ?: res.message()
-                                                              "خطأ من السيرفر (${res.code()}): $err"
+                                                          // تجربة النماذج المتاحة بالتسلسل
+                                                          val candidateModels = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.6-27b")
+                                                          var botReply: String? = null
+                                                          var lastError = ""
+
+                                                          for (m in candidateModels) {
+                                                              val res = api.ask(authHeader, GroqReq(model = m, messages = reqList))
+                                                              if (res.isSuccessful) {
+                                                                  val textRes = res.body()?.choices?.firstOrNull()?.message?.content
+                                                                  if (!textRes.isNullOrBlank()) {
+                                                                      botReply = textRes
+                                                                      break
+                                                                  }
+                                                              } else {
+                                                                  lastError = res.errorBody()?.string() ?: res.message()
+                                                              }
                                                           }
-                                                          
-                                                          db.messageDao().insert(MessageEntity(sender = "LARA", text = reply))
+
+                                                          val finalResult = botReply ?: ("عذراً، صار خلل بالسيرفر: " + lastError)
+                                                          db.messageDao().insert(MessageEntity(sender = "LARA", text = finalResult))
                                                       } catch (e: Exception) {
                                                           db.messageDao().insert(MessageEntity(sender = "LARA", text = "معلش تأكد من الإنترنت: " + e.localizedMessage))
                                                       }
