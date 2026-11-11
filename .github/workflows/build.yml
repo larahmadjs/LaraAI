@@ -75,8 +75,8 @@ jobs:
                   applicationId = "com.laraai.app"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 6
-                  versionName = "1.0.5"
+                  versionCode = 7
+                  versionName = "1.0.6"
               }
               buildTypes { release { isMinifyEnabled = false } }
               compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -100,7 +100,7 @@ jobs:
           }
           """
 
-          # AndroidManifest.xml مع تفعيل الأيقونة
+          # AndroidManifest.xml
           files["android/app/src/main/AndroidManifest.xml"] = """<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
@@ -169,7 +169,7 @@ jobs:
           abstract class AppDb : RoomDatabase() { abstract fun messageDao(): MessageDao }
 
           data class ChatMsg(val role: String, val content: String)
-          data class GroqReq(val model: String = "llama-3.3-70b-versatile", val messages: List<ChatMsg>)
+          data class GroqReq(val model: String = "llama-3.1-8b-instant", val messages: List<ChatMsg>)
           data class GroqChoice(val message: ChatMsg)
           data class GroqRes(val choices: List<GroqChoice>?)
 
@@ -240,10 +240,17 @@ jobs:
 
                                                           val authHeader = "Bearer " + myApiKey
                                                           val res = api.ask(authHeader, GroqReq(messages = reqList))
-                                                          val reply = res.body()?.choices?.firstOrNull()?.message?.content ?: "تكرم عينك، بس ما وصلني رد واضح من السيرفر!"
+                                                          
+                                                          val reply = if (res.isSuccessful) {
+                                                              res.body()?.choices?.firstOrNull()?.message?.content ?: "تكرم عينك، ما وصل رد!"
+                                                          } else {
+                                                              val err = res.errorBody()?.string() ?: res.message()
+                                                              "خطأ من السيرفر (${res.code()}): $err"
+                                                          }
+                                                          
                                                           db.messageDao().insert(MessageEntity(sender = "LARA", text = reply))
                                                       } catch (e: Exception) {
-                                                          db.messageDao().insert(MessageEntity(sender = "LARA", text = "معلش تأكد من الإنترنت، وبخدمك من عيوني!"))
+                                                          db.messageDao().insert(MessageEntity(sender = "LARA", text = "معلش تأكد من الإنترنت: " + e.localizedMessage))
                                                       }
                                                       thinking = false
                                                   }
