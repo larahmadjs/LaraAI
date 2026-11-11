@@ -24,10 +24,14 @@ jobs:
         with:
           gradle-version: '8.6'
 
+      - name: Install Image Tool
+        run: pip install Pillow
+
       - name: Generate Project Code
         run: |
           python3 - << 'EOF'
           import os
+          from PIL import Image
 
           files = {}
 
@@ -71,8 +75,8 @@ jobs:
                   applicationId = "com.laraai.app"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 3
-                  versionName = "1.0.2"
+                  versionCode = 5
+                  versionName = "1.0.4"
               }
               buildTypes { release { isMinifyEnabled = false } }
               compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -96,12 +100,14 @@ jobs:
           }
           """
 
-          # AndroidManifest.xml
+          # AndroidManifest.xml مع الأيقونة المخصصة
           files["android/app/src/main/AndroidManifest.xml"] = """<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <application
                   android:label="LARA AI"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher"
                   android:supportsRtl="true"
                   android:theme="@android:style/Theme.Material.NoActionBar">
                   <activity android:name=".MainActivity" android:exported="true">
@@ -272,7 +278,41 @@ jobs:
               os.makedirs(os.path.dirname(path), exist_ok=True)
               with open(path, "w", encoding="utf-8") as f:
                   f.write(content)
-          print("Files written successfully")
+
+          # معالجة وتحويل الصورة المرفوعة إلى أيقونة رسمية
+          valid_exts = ('.jpg', '.jpeg', '.png', '.webp')
+          image_files = [f for f in os.listdir('.') if f.lower().endswith(valid_exts) and not f.startswith('.')]
+
+          if image_files:
+              src_img_path = image_files[0]
+              with Image.open(src_img_path) as img:
+                  w, h = img.size
+                  sq_size = min(w, h)
+                  # قص الصورة بتركيز ذكي على الوجوه في الأعلى
+                  top = int(h * 0.22) if h > w else 0
+                  if top + sq_size > h:
+                      top = max(0, h - sq_size)
+                  left = int((w - sq_size) / 2) if w > sq_size else 0
+
+                  cropped = img.crop((left, top, left + sq_size, top + sq_size))
+
+                  # حفظ الأيقونة بجميع مقاسات الأندرويد الرسمية
+                  icon_sizes = {
+                      'mipmap-mdpi': 48,
+                      'mipmap-hdpi': 72,
+                      'mipmap-xhdpi': 96,
+                      'mipmap-xxhdpi': 144,
+                      'mipmap-xxxhdpi': 192
+                  }
+
+                  for folder, size in icon_sizes.items():
+                      out_dir = f"android/app/src/main/res/{folder}"
+                      os.makedirs(out_dir, exist_ok=True)
+                      resized = cropped.resize((size, size), Image.Resampling.LANCZOS)
+                      resized.save(f"{out_dir}/ic_launcher.png", format="PNG")
+              print("Custom icon generated successfully!")
+          else:
+              print("No custom image found, default icon will be used.")
           EOF
 
       - name: Build APK with Gradle
