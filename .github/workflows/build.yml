@@ -19,11 +19,10 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.6
         uses: gradle/actions/setup-gradle@v3
-
-      - name: Accept Android Licenses
-        run: yes | sdkmanager --licenses || true
+        with:
+          gradle-version: '8.6'
 
       - name: Generate Project Code
         run: |
@@ -46,7 +45,7 @@ jobs:
 
           # root build.gradle.kts
           files["android/build.gradle.kts"] = """plugins {
-              id("com.android.application") version "8.4.0" apply false
+              id("com.android.application") version "8.3.2" apply false
               id("org.jetbrains.kotlin.android") version "1.9.23" apply false
               id("com.google.devtools.ksp") version "1.9.23-1.0.20" apply false
           }
@@ -75,8 +74,15 @@ jobs:
                   versionCode = 1
                   versionName = "1.0.0"
               }
-              buildTypes { release { isMinifyEnabled = false } }
-              compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
               kotlinOptions { jvmTarget = "17" }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.11" }
@@ -115,7 +121,7 @@ jobs:
           </manifest>
           """
 
-          # MainActivity.kt (كامل مع الغرف والشاشات والذكاء الاصطناعي)
+          # MainActivity.kt
           files["android/app/src/main/java/com/laraai/app/MainActivity.kt"] = """package com.laraai.app
 
           import android.os.Bundle
@@ -148,19 +154,19 @@ jobs:
           import retrofit2.http.Body
           import retrofit2.http.POST
 
-          @Entity(tableName = "msgs")
-          data class MsgEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val sender: String, val text: String)
+          @Entity(tableName = "messages")
+          data class MessageEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val sender: String, val text: String)
 
           @Dao
-          interface MsgDao {
-              @Query("SELECT * FROM msgs ORDER BY id ASC")
-              fun getAll(): kotlinx.coroutines.flow.Flow<List<MsgEntity>>
+          interface MessageDao {
+              @Query("SELECT * FROM messages ORDER BY id ASC")
+              fun getAll(): kotlinx.coroutines.flow.Flow<List<MessageEntity>>
               @Insert
-              suspend fun insert(msg: MsgEntity)
+              suspend fun insert(msg: MessageEntity)
           }
 
-          @Database(entities = [MsgEntity::class], version = 1, exportSchema = false)
-          abstract class LocalDb : RoomDatabase() { abstract fun dao(): MsgDao }
+          @Database(entities = [MessageEntity::class], version = 1, exportSchema = false)
+          abstract class AppDb : RoomDatabase() { abstract fun messageDao(): MessageDao }
 
           data class ChatReq(val messages: List<Map<String, String>>)
           data class ChatRes(val reply: String?)
@@ -169,25 +175,25 @@ jobs:
           class MainActivity : ComponentActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
-                  val db = Room.databaseBuilder(applicationContext, LocalDb::class.java, "lara.db").build()
+                  val db = Room.databaseBuilder(applicationContext, AppDb::class.java, "lara_app.db").build()
                   val api = Retrofit.Builder().baseUrl("https://lara-ai-backend.yoursubdomain.workers.dev/")
                       .addConverterFactory(GsonConverterFactory.create()).build().create(LaraApi::class.java)
 
                   setContent {
-                      val darkNavy = Color(0xFF090610)
-                      val cardPurple = Color(0xFF130E22)
+                      val bgDark = Color(0xFF090610)
+                      val cardDark = Color(0xFF130E22)
                       val neonPurple = Color(0xFFA855F7)
                       val vibrantPurple = Color(0xFF7C3AED)
 
                       CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                          val msgs by db.dao().getAll().collectAsState(initial = emptyList())
+                          val msgs by db.messageDao().getAll().collectAsState(initial = emptyList())
                           var input by remember { mutableStateOf("") }
                           var thinking by remember { mutableStateOf(false) }
                           val scope = rememberCoroutineScope()
 
                           Scaffold(
                               topBar = {
-                                  Surface(color = cardPurple, shadowElevation = 4.dp) {
+                                  Surface(color = cardDark, shadowElevation = 4.dp) {
                                       Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                                           Box(Modifier.size(36.dp).clip(CircleShape).background(neonPurple), contentAlignment = Alignment.Center) {
                                               Text("L", color = Color.White)
@@ -201,7 +207,7 @@ jobs:
                                   }
                               },
                               bottomBar = {
-                                  Row(Modifier.fillMaxWidth().background(cardPurple).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                  Row(Modifier.fillMaxWidth().background(cardDark).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                       OutlinedTextField(
                                           value = input, onValueChange = { input = it },
                                           modifier = Modifier.weight(1f),
@@ -214,6 +220,63 @@ jobs:
                                               if (input.isNotBlank() && !thinking) {
                                                   val userMsg = input.trim()
                                                   input = ""
+                                                  thinking = true
+                                                  scope.launch(Dispatchers.IO) {
+                                                      db.messageDao().insert(MessageEntity(sender = "USER", text = userMsg))
+                                                      try {
+                                                          val res = api.ask(ChatReq(listOf(mapOf("role" to "user", "content" to userMsg))))
+                                                          val reply = res.body()?.reply ?: "تكرم عينك، بس صار خلل بسيط بالاتصال!"
+                                                          db.messageDao().insert(MessageEntity(sender = "LARA", text = reply))
+                                                      } catch (e: Exception) {
+                                                          db.messageDao().insert(MessageEntity(sender = "LARA", text = "معلش تأكد من الإنترنت، وبخدمك من عيوني!"))
+                                                      }
+                                                      thinking = false
+                                                  }
+                                              }
+                                          },
+                                          modifier = Modifier.background(Brush.linearGradient(listOf(neonPurple, vibrantPurple)), CircleShape)
+                                      ) {
+                                          Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = Color.White)
+                                      }
+                                  }
+                              }
+                          ) { pad ->
+                              Box(Modifier.fillMaxSize().padding(pad).background(bgDark).padding(12.dp)) {
+                                  LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                      items(msgs) { m ->
+                                          val isUser = m.sender == "USER"
+                                          Row(Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
+                                              Box(Modifier.clip(RoundedCornerShape(12.dp)).background(if (isUser) vibrantPurple else cardDark).padding(12.dp)) {
+                                                  Text(m.text, color = Color.White)
+                                              }
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+          """
+
+          for path, content in files.items():
+              os.makedirs(os.path.dirname(path), exist_ok=True)
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(content)
+          print("Files written successfully")
+          EOF
+
+      - name: Build APK with Gradle
+        run: |
+          cd android
+          gradle assembleDebug --no-daemon
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LaraAI-App-Debug
+          path: android/app/build/outputs/apk/debug/app-debug.apkinput = ""
                                                   thinking = true
                                                   scope.launch(Dispatchers.IO) {
                                                       db.dao().insert(MsgEntity(sender = "USER", text = userMsg))
