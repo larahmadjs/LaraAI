@@ -19,11 +19,10 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.6
         uses: gradle/actions/setup-gradle@v3
-
-      - name: Accept Android Licenses
-        run: yes | sdkmanager --licenses || true
+        with:
+          gradle-version: '8.6'
 
       - name: Generate Project Code
         run: |
@@ -46,7 +45,7 @@ jobs:
 
           # root build.gradle.kts
           files["android/build.gradle.kts"] = """plugins {
-              id("com.android.application") version "8.4.0" apply false
+              id("com.android.application") version "8.3.2" apply false
               id("org.jetbrains.kotlin.android") version "1.9.23" apply false
               id("com.google.devtools.ksp") version "1.9.23-1.0.20" apply false
           }
@@ -75,8 +74,15 @@ jobs:
                   versionCode = 1
                   versionName = "1.0.0"
               }
-              buildTypes { release { isMinifyEnabled = false } }
-              compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
               kotlinOptions { jvmTarget = "17" }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.11" }
@@ -115,7 +121,7 @@ jobs:
           </manifest>
           """
 
-          # MainActivity.kt (كامل مع الغرف والشاشات والذكاء الاصطناعي)
+          # MainActivity.kt
           files["android/app/src/main/java/com/laraai/app/MainActivity.kt"] = """package com.laraai.app
 
           import android.os.Bundle
@@ -148,19 +154,19 @@ jobs:
           import retrofit2.http.Body
           import retrofit2.http.POST
 
-          @Entity(tableName = "msgs")
-          data class MsgEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val sender: String, val text: String)
+          @Entity(tableName = "messages")
+          data class MessageEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val sender: String, val text: String)
 
           @Dao
-          interface MsgDao {
-              @Query("SELECT * FROM msgs ORDER BY id ASC")
-              fun getAll(): kotlinx.coroutines.flow.Flow<List<MsgEntity>>
+          interface MessageDao {
+              @Query("SELECT * FROM messages ORDER BY id ASC")
+              fun getAll(): kotlinx.coroutines.flow.Flow<List<MessageEntity>>
               @Insert
-              suspend fun insert(msg: MsgEntity)
+              suspend fun insert(msg: MessageEntity)
           }
 
-          @Database(entities = [MsgEntity::class], version = 1, exportSchema = false)
-          abstract class LocalDb : RoomDatabase() { abstract fun dao(): MsgDao }
+          @Database(entities = [MessageEntity::class], version = 1, exportSchema = false)
+          abstract class AppDb : RoomDatabase() { abstract fun messageDao(): MessageDao }
 
           data class ChatReq(val messages: List<Map<String, String>>)
           data class ChatRes(val reply: String?)
@@ -169,25 +175,25 @@ jobs:
           class MainActivity : ComponentActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
-                  val db = Room.databaseBuilder(applicationContext, LocalDb::class.java, "lara.db").build()
+                  val db = Room.databaseBuilder(applicationContext, AppDb::class.java, "lara_app.db").build()
                   val api = Retrofit.Builder().baseUrl("https://lara-ai-backend.yoursubdomain.workers.dev/")
                       .addConverterFactory(GsonConverterFactory.create()).build().create(LaraApi::class.java)
 
                   setContent {
-                      val darkNavy = Color(0xFF090610)
-                      val cardPurple = Color(0xFF130E22)
+                      val bgDark = Color(0xFF090610)
+                      val cardDark = Color(0xFF130E22)
                       val neonPurple = Color(0xFFA855F7)
                       val vibrantPurple = Color(0xFF7C3AED)
 
                       CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                          val msgs by db.dao().getAll().collectAsState(initial = emptyList())
+                          val msgs by db.messageDao().getAll().collectAsState(initial = emptyList())
                           var input by remember { mutableStateOf("") }
                           var thinking by remember { mutableStateOf(false) }
                           val scope = rememberCoroutineScope()
 
                           Scaffold(
                               topBar = {
-                                  Surface(color = cardPurple, shadowElevation = 4.dp) {
+                                  Surface(color = cardDark, shadowElevation = 4.dp) {
                                       Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                                           Box(Modifier.size(36.dp).clip(CircleShape).background(neonPurple), contentAlignment = Alignment.Center) {
                                               Text("L", color = Color.White)
@@ -201,7 +207,7 @@ jobs:
                                   }
                               },
                               bottomBar = {
-                                  Row(Modifier.fillMaxWidth().background(cardPurple).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                  Row(Modifier.fillMaxWidth().background(cardDark).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                       OutlinedTextField(
                                           value = input, onValueChange = { input = it },
                                           modifier = Modifier.weight(1f),
@@ -216,13 +222,13 @@ jobs:
                                                   input = ""
                                                   thinking = true
                                                   scope.launch(Dispatchers.IO) {
-                                                      db.dao().insert(MsgEntity(sender = "USER", text = userMsg))
+                                                      db.messageDao().insert(MessageEntity(sender = "USER", text = userMsg))
                                                       try {
                                                           val res = api.ask(ChatReq(listOf(mapOf("role" to "user", "content" to userMsg))))
                                                           val reply = res.body()?.reply ?: "تكرم عينك، بس صار خلل بسيط بالاتصال!"
-                                                          db.dao().insert(MsgEntity(sender = "LARA", text = reply))
+                                                          db.messageDao().insert(MessageEntity(sender = "LARA", text = reply))
                                                       } catch (e: Exception) {
-                                                          db.dao().insert(MsgEntity(sender = "LARA", text = "معلش تأكد من الإنترنت، وبخدمك من عيوني!"))
+                                                          db.messageDao().insert(MessageEntity(sender = "LARA", text = "معلش تأكد من الإنترنت، وبخدمك من عيوني!"))
                                                       }
                                                       thinking = false
                                                   }
@@ -235,12 +241,12 @@ jobs:
                                   }
                               }
                           ) { pad ->
-                              Box(Modifier.fillMaxSize().padding(pad).background(darkNavy).padding(12.dp)) {
+                              Box(Modifier.fillMaxSize().padding(pad).background(bgDark).padding(12.dp)) {
                                   LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                       items(msgs) { m ->
                                           val isUser = m.sender == "USER"
                                           Row(Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
-                                              Box(Modifier.clip(RoundedCornerShape(12.dp)).background(if (isUser) vibrantPurple else cardPurple).padding(12.dp)) {
+                                              Box(Modifier.clip(RoundedCornerShape(12.dp)).background(if (isUser) vibrantPurple else cardDark).padding(12.dp)) {
                                                   Text(m.text, color = Color.White)
                                               }
                                           }
@@ -258,527 +264,13 @@ jobs:
               os.makedirs(os.path.dirname(path), exist_ok=True)
               with open(path, "w", encoding="utf-8") as f:
                   f.write(content)
+          print("Files written successfully")
           EOF
 
       - name: Build APK with Gradle
         run: |
           cd android
           gradle assembleDebug --no-daemon
-
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: LaraAI-App-Debug
-          path: android/app/build/outputs/apk/debug/app-debug.apkinput = ""
-                                                  thinking = true
-                                                  scope.launch(Dispatchers.IO) {
-                                                      db.dao().insert(MsgEntity(sender = "USER", text = userMsg))
-                                                      try {
-                                                          val res = api.ask(ChatReq(listOf(mapOf("role" to "user", "content" to userMsg))))
-                                                          val reply = res.body()?.reply ?: "تكرم عينك، بس صار خلل بسيط بالاتصال!"
-                                                          db.dao().insert(MsgEntity(sender = "LARA", text = reply))
-                                                      } catch (e: Exception) {
-                                                          db.dao().insert(MsgEntity(sender = "LARA", text = "معلش تأكد من الإنترنت، وبخدمك من عيوني!"))
-                                                      }
-                                                      thinking = false
-                                                  }
-                                              }
-                                          },
-                                          modifier = Modifier.background(Brush.linearGradient(listOf(neonPurple, vibrantPurple)), CircleShape)
-                                      ) {
-                                          Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = Color.White)
-                                      }
-                                  }
-                              }
-                          ) { pad ->
-                              Box(Modifier.fillMaxSize().padding(pad).background(darkNavy).padding(12.dp)) {
-                                  LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                      items(msgs) { m ->
-                                          val isUser = m.sender == "USER"
-                                          Row(Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
-                                              Box(Modifier.clip(RoundedCornerShape(12.dp)).background(if (isUser) vibrantPurple else cardPurple).padding(12.dp)) {
-                                                  Text(m.text, color = Color.White)
-                                              }
-                                          }
-                                      }
-                                  }
-                              }
-                          }
-                      }
-                  }
-              }
-          }
-          """
-
-          for path, content in files.items():
-              os.makedirs(os.path.dirname(path), exist_ok=True)
-              with open(path, "w", encoding="utf-8") as f:
-                  f.write(content)
-          EOF
-
-      - name: Build APK with Gradle
-        run: |
-          cd android
-          gradle assembleDebug --no-daemon
-
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: LaraAI-App-Debug
-          path: android/app/build/outputs/apk/debug/app-debug.apkjava/com/laraai/app/data/remote/ApiModels.kt"] = """package com.laraai.app.data.remote
-          import com.google.gson.annotations.SerializedName
-
-          data class ChatMessage(@SerializedName("role") val role: String, @SerializedName("content") val content: String)
-          data class ChatRequest(@SerializedName("messages") val messages: List<ChatMessage>)
-          data class ChatResponse(@SerializedName("reply") val reply: String?, @SerializedName("status") val status: String?)
-          data class HealthResponse(@SerializedName("status") val status: String)
-          """
-
-          # Retrofit: LaraApiService.kt
-          files["android/app/src/main/java/com/laraai/app/data/remote/LaraApiService.kt"] = """package com.laraai.app.data.remote
-          import retrofit2.Response
-          import retrofit2.http.Body
-          import retrofit2.http.GET
-          import retrofit2.http.POST
-
-          interface LaraApiService {
-              @POST("chat")
-              suspend fun sendMessage(@Body request: ChatRequest): Response<ChatResponse>
-              @GET("health")
-              suspend fun checkHealth(): Response<HealthResponse>
-          }
-          """
-
-          # Retrofit: RetrofitClient.kt
-          files["android/app/src/main/java/com/laraai/app/data/remote/RetrofitClient.kt"] = """package com.laraai.app.data.remote
-          import okhttp3.OkHttpClient
-          import retrofit2.Retrofit
-          import retrofit2.converter.gson.GsonConverterFactory
-          import java.util.concurrent.TimeUnit
-
-          object RetrofitClient {
-              private var currentUrl = ""
-              private var service: LaraApiService? = null
-
-              fun getService(baseUrl: String): LaraApiService {
-                  val sanitized = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
-                  if (service == null || currentUrl != sanitized) {
-                      currentUrl = sanitized
-                      val client = OkHttpClient.Builder()
-                          .connectTimeout(30, TimeUnit.SECONDS)
-                          .readTimeout(60, TimeUnit.SECONDS)
-                          .build()
-                      service = Retrofit.Builder()
-                          .baseUrl(sanitized)
-                          .client(client)
-                          .addConverterFactory(GsonConverterFactory.create())
-                          .build()
-                          .create(LaraApiService::class.java)
-                  }
-                  return service!!
-              }
-          }
-          """
-
-          # Repository: ChatRepository.kt
-          files["android/app/src/main/java/com/laraai/app/data/repository/ChatRepository.kt"] = """package com.laraai.app.data.repository
-          import com.laraai.app.data.local.MessageDao
-          import com.laraai.app.data.local.MessageEntity
-          import com.laraai.app.data.preferences.AppPreferences
-          import com.laraai.app.data.remote.ChatMessage
-          import com.laraai.app.data.remote.ChatRequest
-          import com.laraai.app.data.remote.RetrofitClient
-          import kotlinx.coroutines.flow.Flow
-          import kotlinx.coroutines.flow.first
-
-          class ChatRepository(private val messageDao: MessageDao, private val prefs: AppPreferences) {
-              val allMessages: Flow<List<MessageEntity>> = messageDao.getAllMessages()
-
-              suspend fun sendMessage(userText: String): Result<String> {
-                  messageDao.insertMessage(MessageEntity(sender = "USER", content = userText))
-                  return try {
-                      val url = prefs.serverUrl.first()
-                      val api = RetrofitClient.getService(url)
-                      val history = messageDao.getRecentMessages(10).reversed().map {
-                          ChatMessage(role = if (it.sender == "USER") "user" else "assistant", content = it.content)
-                      }
-                      val response = api.sendMessage(ChatRequest(messages = history))
-                      if (response.isSuccessful && response.body()?.reply != null) {
-                          val reply = response.body()!!.reply!!
-                          messageDao.insertMessage(MessageEntity(sender = "LARA", content = reply))
-                          Result.success(reply)
-                      } else {
-                          val err = "يا هلا، صار خلل بسيط بالاتصال بالسيرفر، جرب كمان شوي!"
-                          messageDao.insertMessage(MessageEntity(sender = "LARA", content = err, isError = true))
-                          Result.failure(Exception(err))
-                      }
-                  } catch (e: Exception) {
-                      val err = "معلش تأكد من اتصال الإنترنت عندك، مش قادرة أوصل للشبكة!"
-                      messageDao.insertMessage(MessageEntity(sender = "LARA", content = err, isError = true))
-                      Result.failure(Exception(err))
-                  }
-              }
-
-              suspend fun clearHistory() = messageDao.clearAllMessages()
-              suspend fun testConnection(): Boolean = try {
-                  RetrofitClient.getService(prefs.serverUrl.first()).checkHealth().isSuccessful
-              } catch (e: Exception) { false }
-          }
-          """
-          # UI Theme
-          files["android/app/src/main/java/com/laraai/app/ui/theme/Color.kt"] = """package com.laraai.app.ui.theme
-          import androidx.compose.ui.graphics.Color
-          val BackgroundNavy = Color(0xFF090610)
-          val SurfaceCard = Color(0xFF130E22)
-          val NeonPurple = Color(0xFFA855F7)
-          val VibrantPurple = Color(0xFF7C3AED)
-          val TextWhite = Color(0xFFF9FAFB)
-          val TextMuted = Color(0xFF9CA3AF)
-          """
-
-          files["android/app/src/main/java/com/laraai/app/ui/theme/Theme.kt"] = """package com.laraai.app.ui.theme
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.Composable
-
-          private val DarkColors = darkColorScheme(
-              primary = NeonPurple,
-              secondary = VibrantPurple,
-              background = BackgroundNavy,
-              surface = SurfaceCard,
-              onPrimary = TextWhite,
-              onBackground = TextWhite,
-              onSurface = TextWhite
-          )
-
-          @Composable
-          fun LaraAITheme(darkTheme: Boolean = true, content: @Composable () -> Unit) {
-              MaterialTheme(colorScheme = DarkColors, content = content)
-          }
-          """
-
-          # ViewModels
-          files["android/app/src/main/java/com/laraai/app/ui/viewmodel/ChatViewModel.kt"] = """package com.laraai.app.ui.viewmodel
-          import androidx.lifecycle.ViewModel
-          import androidx.lifecycle.viewModelScope
-          import com.laraai.app.data.local.MessageEntity
-          import com.laraai.app.data.repository.ChatRepository
-          import kotlinx.coroutines.flow.*
-          import kotlinx.coroutines.launch
-
-          class ChatViewModel(private val repository: ChatRepository) : ViewModel() {
-              val messages: StateFlow<List<MessageEntity>> = repository.allMessages.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-              private val _isThinking = MutableStateFlow(false)
-              val isThinking: StateFlow<Boolean> = _isThinking.asStateFlow()
-
-              fun sendMessage(text: String) {
-                  if (text.isBlank()) return
-                  viewModelScope.launch {
-                      _isThinking.value = true
-                      repository.sendMessage(text.trim())
-                      _isThinking.value = false
-                  }
-              }
-          }
-          """
-
-          files["android/app/src/main/java/com/laraai/app/ui/viewmodel/SettingsViewModel.kt"] = """package com.laraai.app.ui.viewmodel
-          import androidx.lifecycle.ViewModel
-          import androidx.lifecycle.viewModelScope
-          import com.laraai.app.data.preferences.AppPreferences
-          import com.laraai.app.data.repository.ChatRepository
-          import kotlinx.coroutines.flow.*
-          import kotlinx.coroutines.launch
-
-          class SettingsViewModel(private val prefs: AppPreferences, private val repo: ChatRepository) : ViewModel() {
-              val currentUrl: StateFlow<String> = prefs.serverUrl.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppPreferences.DEFAULT_SERVER_URL)
-              val isDarkTheme: StateFlow<Boolean> = prefs.isDarkTheme.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
-              private val _connStatus = MutableStateFlow<Boolean?>(null)
-              val connStatus: StateFlow<Boolean?> = _connStatus.asStateFlow()
-
-              fun setUrl(url: String) { viewModelScope.launch { prefs.setServerUrl(url) } }
-              fun checkConn() { viewModelScope.launch { _connStatus.value = repo.testConnection() } }
-              fun clearHistory() { viewModelScope.launch { repo.clearHistory() } }
-          }
-          """
-
-          # Screens
-          files["android/app/src/main/java/com/laraai/app/ui/screens/SplashScreen.kt"] = """package com.laraai.app.ui.screens
-          import androidx.compose.animation.core.*
-          import androidx.compose.foundation.background
-          import androidx.compose.foundation.border
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.shape.CircleShape
-          import androidx.compose.material3.MaterialTheme
-          import androidx.compose.material3.Text
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.scale
-          import androidx.compose.ui.graphics.Color
-          import androidx.compose.ui.text.font.FontWeight
-          import androidx.compose.ui.unit.dp
-          import androidx.compose.ui.unit.sp
-          import com.laraai.app.ui.theme.NeonPurple
-          import kotlinx.coroutines.delay
-
-          @Composable
-          fun SplashScreen(onDone: () -> Unit) {
-              val scale = remember { Animatable(0.8f) }
-              LaunchedEffect(Unit) {
-                  scale.animateTo(1.1f, infiniteRepeatable(tween(1000), RepeatMode.Reverse))
-              }
-              LaunchedEffect(Unit) {
-                  delay(2200)
-                  onDone()
-              }
-              Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
-                  Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                      Box(
-                          modifier = Modifier.size(110.dp).scale(scale.value)
-                              .border(3.dp, NeonPurple, CircleShape).background(NeonPurple.copy(alpha = 0.2f), CircleShape),
-                          contentAlignment = Alignment.Center
-                      ) {
-                          Text("LARA", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                      }
-                      Spacer(Modifier.height(20.dp))
-                      Text("LARA AI", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                      Text("مساعدتك الذكية بلمسة أردنية 🇯🇴", fontSize = 15.sp, color = NeonPurple)
-                  }
-              }
-          }
-          """
-          files["android/app/src/main/java/com/laraai/app/ui/screens/ChatScreen.kt"] = """package com.laraai.app.ui.screens
-          import androidx.compose.foundation.background
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.lazy.LazyColumn
-          import androidx.compose.foundation.lazy.items
-          import androidx.compose.foundation.shape.CircleShape
-          import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.material.icons.Icons
-          import androidx.compose.material.icons.automirrored.filled.Send
-          import androidx.compose.material.icons.filled.Settings
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.clip
-          import androidx.compose.ui.graphics.Brush
-          import androidx.compose.ui.graphics.Color
-          import androidx.compose.ui.unit.dp
-          import androidx.compose.ui.unit.sp
-          import com.laraai.app.ui.theme.NeonPurple
-          import com.laraai.app.ui.theme.TextMuted
-          import com.laraai.app.ui.theme.VibrantPurple
-          import com.laraai.app.ui.viewmodel.ChatViewModel
-
-          @OptIn(ExperimentalMaterial3Api::class)
-          @Composable
-          fun ChatScreen(viewModel: ChatViewModel, onSettings: () -> Unit) {
-              val messages by viewModel.messages.collectAsState()
-              val isThinking by viewModel.isThinking.collectAsState()
-              var input by remember { mutableStateOf("") }
-
-              Scaffold(
-                  topBar = {
-                      TopAppBar(
-                          title = { Text("لارا (LARA AI) 🇯🇴") },
-                          actions = {
-                              IconButton(onClick = onSettings) {
-                                  Icon(Icons.Default.Settings, contentDescription = "الإعدادات")
-                              }
-                          }
-                      )
-                  },
-                  bottomBar = {
-                      Row(
-                          modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp),
-                          verticalAlignment = Alignment.CenterVertically
-                      ) {
-                          OutlinedTextField(
-                              value = input,
-                              onValueChange = { input = it },
-                              modifier = Modifier.weight(1f),
-                              placeholder = { Text("احكي معي شو ما بدك...") },
-                              shape = RoundedCornerShape(20.dp)
-                          )
-                          Spacer(Modifier.width(8.dp))
-                          IconButton(
-                              onClick = {
-                                  if (input.isNotBlank() && !isThinking) {
-                                      viewModel.sendMessage(input)
-                                      input = ""
-                                  }
-                              },
-                              modifier = Modifier.background(Brush.linearGradient(listOf(NeonPurple, VibrantPurple)), CircleShape)
-                          ) {
-                              Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "إرسال", tint = Color.White)
-                          }
-                      }
-                  }
-              ) { padding ->
-                  Column(modifier = Modifier.fillMaxSize().padding(padding).padding(12.dp)) {
-                      LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                          items(messages) { msg ->
-                              val isUser = msg.sender == "USER"
-                              Row(
-                                  modifier = Modifier.fillMaxWidth(),
-                                  horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
-                              ) {
-                                  Box(
-                                      modifier = Modifier
-                                          .clip(RoundedCornerShape(12.dp))
-                                          .background(if (isUser) VibrantPurple else MaterialTheme.colorScheme.surface)
-                                          .padding(12.dp)
-                                  ) {
-                                      Text(msg.content, color = Color.White)
-                                  }
-                              }
-                          }
-                          if (isThinking) {
-                              item {
-                                  Text("لارا بتفكر...", color = NeonPurple, fontSize = 13.sp)
-                              }
-                          }
-                      }
-                  }
-              }
-          }
-          """
-
-          files["android/app/src/main/java/com/laraai/app/ui/screens/SettingsScreen.kt"] = """package com.laraai.app.ui.screens
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.material.icons.Icons
-          import androidx.compose.material.icons.automirrored.filled.ArrowBack
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.graphics.Color
-          import androidx.compose.ui.unit.dp
-          import com.laraai.app.ui.viewmodel.SettingsViewModel
-
-          @OptIn(ExperimentalMaterial3Api::class)
-          @Composable
-          fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
-              val currentUrl by viewModel.currentUrl.collectAsState()
-              var urlText by remember(currentUrl) { mutableStateOf(currentUrl) }
-              val connStatus by viewModel.connStatus.collectAsState()
-
-              Scaffold(
-                  topBar = {
-                      TopAppBar(
-                          title = { Text("الإعدادات") },
-                          navigationIcon = {
-                              IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "رجوع") }
-                          }
-                      )
-                  }
-              ) { padding ->
-                  Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-                      Text("رابط الخادم السحابي (Cloudflare Worker):")
-                      Spacer(Modifier.height(8.dp))
-                      OutlinedTextField(
-                          value = urlText,
-                          onValueChange = { urlText = it; viewModel.setUrl(it) },
-                          modifier = Modifier.fillMaxWidth()
-                      )
-                      Spacer(Modifier.height(12.dp))
-                      Button(onClick = { viewModel.checkConn() }) {
-                          Text("فحص الاتصال")
-                      }
-                      connStatus?.let {
-                          Text(if (it) "الاتصال سليم 100%!" else "فشل الاتصال بالسيرفر", color = if (it) Color.Green else Color.Red)
-                      }
-                      Spacer(Modifier.height(24.dp))
-                      Button(
-                          onClick = { viewModel.clearHistory() },
-                          colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                      ) {
-                          Text("مسح سجل الرسائل")
-                      }
-                  }
-              }
-          }
-          """
-
-          # App & Activity
-          files["android/app/src/main/java/com/laraai/app/LaraApplication.kt"] = """package com.laraai.app
-          import android.app.Application
-          import com.laraai.app.data.local.AppDatabase
-          import com.laraai.app.data.preferences.AppPreferences
-          import com.laraai.app.data.repository.ChatRepository
-
-          class LaraApplication : Application() {
-              lateinit var preferences: AppPreferences
-              lateinit var chatRepository: ChatRepository
-              override fun onCreate() {
-                  super.onCreate()
-                  val db = AppDatabase.getDatabase(this)
-                  preferences = AppPreferences(this)
-                  chatRepository = ChatRepository(db.messageDao(), preferences)
-              }
-          }
-          """
-
-          files["android/app/src/main/java/com/laraai/app/MainActivity.kt"] = """package com.laraai.app
-          import android.os.Bundle
-          import androidx.activity.ComponentActivity
-          import androidx.activity.compose.setContent
-          import androidx.compose.runtime.CompositionLocalProvider
-          import androidx.compose.ui.platform.LocalLayoutDirection
-          import androidx.compose.ui.unit.LayoutDirection
-          import androidx.navigation.compose.NavHost
-          import androidx.navigation.compose.composable
-          import androidx.navigation.compose.rememberNavController
-          import com.laraai.app.ui.screens.*
-          import com.laraai.app.ui.theme.LaraAITheme
-          import com.laraai.app.ui.viewmodel.ChatViewModel
-          import com.laraai.app.ui.viewmodel.SettingsViewModel
-
-          class MainActivity : ComponentActivity() {
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  val app = application as LaraApplication
-                  val chatVm = ChatViewModel(app.chatRepository)
-                  val settingsVm = SettingsViewModel(app.preferences, app.chatRepository)
-
-                  setContent {
-                      LaraAITheme {
-                          CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                              val nav = rememberNavController()
-                              NavHost(navController = nav, startDestination = "splash") {
-                                  composable("splash") {
-                                      SplashScreen(onDone = {
-                                          nav.navigate("chat") { popUpTo("splash") { inclusive = true } }
-                                      })
-                                  }
-                                  composable("chat") {
-                                      ChatScreen(chatVm, onSettings = { nav.navigate("settings") })
-                                  }
-                                  composable("settings") {
-                                      SettingsScreen(settingsVm, onBack = { nav.popBackStack() })
-                                  }
-                              }
-                          }
-                      }
-                  }
-              }
-          }
-          """
-
-          for path, content in files.items():
-              os.makedirs(os.path.dirname(path), exist_ok=True)
-              with open(path, "w", encoding="utf-8") as f:
-                  f.write(content)
-          print("All project source files generated successfully!")
-          EOF
-
-      - name: Build APK with Gradle
-        run: |
-          cd android
-          gradle wrapper --gradle-version 8.6
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
