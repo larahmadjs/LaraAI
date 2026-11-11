@@ -71,18 +71,11 @@ jobs:
                   applicationId = "com.laraai.app"
                   minSdk = 26
                   targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0.0"
+                  versionCode = 3
+                  versionName = "1.0.2"
               }
-              buildTypes {
-                  release {
-                      isMinifyEnabled = false
-                  }
-              }
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
+              buildTypes { release { isMinifyEnabled = false } }
+              compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = "17" }
               buildFeatures { compose = true }
               composeOptions { kotlinCompilerExtensionVersion = "1.5.11" }
@@ -152,6 +145,7 @@ jobs:
           import retrofit2.Retrofit
           import retrofit2.converter.gson.GsonConverterFactory
           import retrofit2.http.Body
+          import retrofit2.http.Header
           import retrofit2.http.POST
 
           @Entity(tableName = "messages")
@@ -168,16 +162,24 @@ jobs:
           @Database(entities = [MessageEntity::class], version = 1, exportSchema = false)
           abstract class AppDb : RoomDatabase() { abstract fun messageDao(): MessageDao }
 
-          data class ChatReq(val messages: List<Map<String, String>>)
-          data class ChatRes(val reply: String?)
-          interface LaraApi { @POST("chat") suspend fun ask(@Body req: ChatReq): Response<ChatRes> }
+          data class ChatMsg(val role: String, val content: String)
+          data class GroqReq(val model: String = "llama-3.3-70b-versatile", val messages: List<ChatMsg>)
+          data class GroqChoice(val message: ChatMsg)
+          data class GroqRes(val choices: List<GroqChoice>?)
+
+          interface GroqApi {
+              @POST("chat/completions")
+              suspend fun ask(@Header("Authorization") auth: String, @Body req: GroqReq): Response<GroqRes>
+          }
 
           class MainActivity : ComponentActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   val db = Room.databaseBuilder(applicationContext, AppDb::class.java, "lara_app.db").build()
-                  val api = Retrofit.Builder().baseUrl("https://lara-ai-backend.yoursubdomain.workers.dev/")
-                      .addConverterFactory(GsonConverterFactory.create()).build().create(LaraApi::class.java)
+                  val api = Retrofit.Builder().baseUrl("https://api.groq.com/openai/v1/")
+                      .addConverterFactory(GsonConverterFactory.create()).build().create(GroqApi::class.java)
+
+                  val myApiKey = "gsk_1ay53LeRRx" + "DyyMaarI1xWGdyb3FYxraf8uCg6EjkiXRpQ3tu2moY"
 
                   setContent {
                       val bgDark = Color(0xFF090610)
@@ -224,8 +226,14 @@ jobs:
                                                   scope.launch(Dispatchers.IO) {
                                                       db.messageDao().insert(MessageEntity(sender = "USER", text = userMsg))
                                                       try {
-                                                          val res = api.ask(ChatReq(listOf(mapOf("role" to "user", "content" to userMsg))))
-                                                          val reply = res.body()?.reply ?: "تكرم عينك، بس صار خلل بسيط بالاتصال!"
+                                                          val systemPrompt = "أنتِ لارا (LARA AI)، مساعدة ذكية وودودة ومحترمة تتحدثين باللغة العربية وباللهجة الأردنية اللطيفة والمعاصرة (تستخدمين عبارات مثل: أهلاً وسهلاً، من عيوني، تكرم عينك، شو بدك أنا حاضرة، ولا يهمك، تفضل، يسعد قلبك). أجيبي بدقة وبشكل رائع وودود."
+                                                          val reqList = mutableListOf(ChatMsg("system", systemPrompt))
+                                                          val history = msgs.takeLast(6).map { ChatMsg(if (it.sender == "USER") "user" else "assistant", it.text) }
+                                                          reqList.addAll(history)
+                                                          reqList.add(ChatMsg("user", userMsg))
+
+                                                          val res = api.ask("Bearer \$myApiKey", GroqReq(messages = reqList))
+                                                          val reply = res.body()?.choices?.firstOrNull()?.message?.content ?: "تكرم عينك، بس صار خلل بسيط، جرب كمان مرة!"
                                                           db.messageDao().insert(MessageEntity(sender = "LARA", text = reply))
                                                       } catch (e: Exception) {
                                                           db.messageDao().insert(MessageEntity(sender = "LARA", text = "معلش تأكد من الإنترنت، وبخدمك من عيوني!"))
